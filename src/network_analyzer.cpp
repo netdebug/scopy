@@ -733,10 +733,14 @@ void NetworkAnalyzer::computeFrequencyArray()
 		bool stop = false;
 		adjFreq[i] = ret[i];
 
+		std::cout << "######################### Frequency to adjust: " << adjFreq[i] << std::endl;
+
 		for (int j = 1; j < 1024 && !stop; ++j) {
 			double integral;
 			double dummy;
 			double fract = modf(1.0/(double)j,&dummy);
+
+			std::cout << "j = " << j << " fractal = " << fract << std::endl;
 
 			for (auto rate : sampleRates) {
 				if (rate < lastRate) {
@@ -755,8 +759,14 @@ void NetworkAnalyzer::computeFrequencyArray()
 
 				double newFrequency = rate / (integral + fract);
 
+				std::cout << prev << " < " << newFrequency << " < " << next
+					  << " && " << integral << " * " << j << " > " << " 2 "
+					  << " is: " << (newFrequency > prev && newFrequency < next && (integral * j > 2)) << std::endl;
+				std::cout << " rate: " << rate << std::endl;
 				if (newFrequency > prev && newFrequency < next && (integral * j > 2)) {
 					stop = true;
+					double noNeed;
+					double tempFract = modf(rate / adjFreq[i], &noNeed);
 					adjFreq[i] = newFrequency;
 					size_t bufferSize = integral * j;
 
@@ -770,10 +780,17 @@ void NetworkAnalyzer::computeFrequencyArray()
 
 					iterations.push_back(networkIteration(newFrequency, rate, bufferSize));
 					lastRate = rate;
+
+					std::cout << "Old fractal = " << tempFract << std::endl;
+					std::cout << "Frequency adjusted to: " << newFrequency << " with j = " << j << " and fractal = " << fract << std::endl;
+
 					break;
 				}
 			}
 
+		}
+		if (!stop) {
+			std::cout << "######################### Adjusted Frequency not found for value: " << adjFreq[i] << std::endl;
 		}
 	}
 
@@ -1030,6 +1047,7 @@ void NetworkAnalyzer::run()
 		std::cout << "For freq: " << frequency << " buffer_size: " << buffer_size
 			  << " Rate: " << adc_rate << " Took: " << t.elapsed() / 1000.0
 			  << " s" << std::endl;
+		std::cout << "Should have taken: " << (double)buffer_size / adc_rate << " s" << std::endl;
 
 		started = iio->started();
 
@@ -1073,7 +1091,7 @@ void NetworkAnalyzer::computeCaptureParams(double frequency,
 		size_t& buffer_size, size_t& adc_rate)
 {
 	adc_rate = fixedRate;
-	size_t nrOfPeriods = 2;
+	size_t nrOfPeriods = 1;
 
 	for (const auto& rate : sampleRates) {
 
