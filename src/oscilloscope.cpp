@@ -3255,7 +3255,7 @@ void Oscilloscope::measureLabelsRearrange()
 	for (int i = 0; i < measurements_data.size(); i++) {
 
 		int channel = measurements_data[i]->channel();
-		if (channel >= nb_channels + nb_math_channels) {
+		if (channel >= nb_channels + nb_math_channels + nb_ref_channels) {
 			continue;
 		}
 
@@ -3293,6 +3293,7 @@ void Oscilloscope::measureLabelsRearrange()
 
 void Oscilloscope::measureUpdateValues()
 {
+
 	for (int i = 0; i < measurements_data.size(); i++) {
 		int channel = measurements_data[i]->channel();
 		ChannelWidget *chn_widget = channelWidgetAtId(channel);
