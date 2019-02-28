@@ -1160,6 +1160,11 @@ void CapturePlot::onChannelAdded(int chnIdx)
 	}
 	measure->setAdcBitCount(12);
 	d_measureObjs.push_back(measure);
+
+	/* */
+	if (isReferenceWaveform(Curve(chnIdx))) {
+		onNewDataReceived();
+	}
 }
 
 void CapturePlot::cleanUpJustBeforeChannelRemoval(int chnIdx)
