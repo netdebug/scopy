@@ -46,6 +46,9 @@
 #include "filter_dc_offset_block.h"
 #include <gnuradio/blocks/stream_to_vector.h>
 #include <gnuradio/blocks/vector_to_stream.h>
+#include <gnuradio/blocks/vector_source_f.h>
+
+#include "adc_sample_conv.hpp"
 
 #include <algorithm>
 
@@ -55,6 +58,9 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QSignalBlocker>
+
+#include "detachedwindowsmanager.h"
+#include "networkanalyzerbufferviewer.h"
 
 #include <iio.h>
 #include <network_analyzer_api.hpp>
@@ -107,6 +113,14 @@ NetworkAnalyzer::NetworkAnalyzer(struct iio_context *ctx, Filter *filt,
 
 	ui->setupUi(this);
 
+	bufferPreviewer = new NetworkAnalyzerBufferViewer();
+
+	connect(ui->oscplot, &QPushButton::clicked, [=]() {
+		DetachedWindow *window = DetachedWindowsManager::getInstance().getWindow();
+		window->setCentralWidget(bufferPreviewer);
+		window->show();
+
+	});
 
 	connect(ui->run_button, SIGNAL(toggled(bool)),
 		runButton, SLOT(setChecked(bool)));
@@ -327,12 +341,29 @@ NetworkAnalyzer::NetworkAnalyzer(struct iio_context *ctx, Filter *filt,
 	ui->gridLayout_plots->addWidget(&m_phaseGraph,1,0,1,1);
 	ui->gridLayout_plots->addWidget(d_bottomHandlesArea,2,0,1,1);
 
+	d_frequencyHandle = new FreePlotLineHandleH(
+				QPixmap(":/icons/time_trigger_handle.svg"),
+				QPixmap(":/icons/time_trigger_left.svg"),
+				QPixmap(":/icons/time_trigger_right.svg"),
+				d_bottomHandlesArea);
+	d_frequencyHandle->setPen(QPen(QColor(74, 100, 255), 2, Qt::SolidLine));
+	d_frequencyHandle->setVisible(true);
+
 	d_hCursorHandle1 = new PlotLineHandleH(
 		QPixmap(":/icons/h_cursor_handle.svg"),
 		d_bottomHandlesArea);
 	d_hCursorHandle2 = new PlotLineHandleH(
 		QPixmap(":/icons/h_cursor_handle.svg"),
 		d_bottomHandlesArea);
+
+	connect(d_frequencyHandle, &FreePlotLineHandleH::positionChanged,
+		&m_dBgraph, &dBgraph::onFrequencyCursorPositionChanged);
+	connect(d_frequencyHandle, &FreePlotLineHandleH::positionChanged,
+		&m_phaseGraph, &dBgraph::onFrequencyCursorPositionChanged);
+
+
+	connect(&m_dBgraph, &dBgraph::frequencySelected,
+		bufferPreviewer, &NetworkAnalyzerBufferViewer::selectBuffers);
 
 	QPen cursorsLinePen = QPen(QColor(155,155,155),1,Qt::DashLine);
 	d_hCursorHandle1->setPen(cursorsLinePen);
@@ -353,6 +384,7 @@ NetworkAnalyzer::NetworkAnalyzer(struct iio_context *ctx, Filter *filt,
 		SLOT(onCursor1PositionChanged(int)));
 	connect(d_hCursorHandle2, SIGNAL(positionChanged(int)),&m_phaseGraph,
 		SLOT(onCursor2PositionChanged(int)));
+//	connect(d_frequencyHandle, &Fr)
 
 	stop_freq->setMaxValue((double) max_samplerate / 3.0 - 1.0);
 	center_freq->setMinValue(2);
@@ -499,6 +531,11 @@ NetworkAnalyzer::~NetworkAnalyzer()
 	delete ui;
 }
 
+void NetworkAnalyzer::setOscilloscope(Oscilloscope *osc)
+{
+	bufferPreviewer->setOscilloscope(osc);
+}
+
 void NetworkAnalyzer::onStartStopFrequencyChanged(double value)
 {
 	if (QObject::sender() == start_freq) {
@@ -589,7 +626,7 @@ void NetworkAnalyzer::onMinMaxPhaseChanged(double value) {
 		if (qAbs(value - phaseMinValue) > 360) {
 			phaseMin->setValue(phaseMinValue + ((int)qAbs(value - phaseMinValue) % 360));
 		}
-	} 
+	}
 }
 
 void NetworkAnalyzer::setMinimumDistanceBetween(SpinBoxA *min, SpinBoxA *max,
@@ -855,6 +892,11 @@ void NetworkAnalyzer::run()
 
 	fixedRate = sampleRates[0];
 
+	//TODO: clear buffer previewer
+//	oscData.clear();
+//	adc_rates.clear();
+	bufferPreviewer->clear();
+
 	for (unsigned int i = 0; !stop && i < iterations.size(); ++i) {
 
 
@@ -954,6 +996,24 @@ void NetworkAnalyzer::run()
 
 		auto mult1 = blocks::multiply_cc::make();
 		auto mult2 = blocks::multiply_cc::make();
+
+		auto sinkCh1 = blocks::vector_sink_f::make();
+		auto sinkCh2 = blocks::vector_sink_f::make();
+
+
+		auto m2k_adc = std::dynamic_pointer_cast<M2kAdc>(adc_dev);
+		auto adc_samp_conv = gnuradio::get_initial_sptr(
+					new adc_sample_conv(2, m2k_adc));
+		adc_samp_conv->setCorrectionGain(0,
+			m2k_adc->chnCorrectionGain(0));
+		adc_samp_conv->setCorrectionGain(1,
+			m2k_adc->chnCorrectionGain(1));
+
+		iio->connect(copy1, 0, adc_samp_conv, 0);
+		iio->connect(copy2, 0, adc_samp_conv, 1);
+
+		iio->connect(adc_samp_conv, 0, sinkCh1, 0);
+		iio->connect(adc_samp_conv, 1, sinkCh2, 0);
 
 		if (ui->dcFilterBtn->isChecked()) {
 			iio->connect(copy1, 0, s2v1, 0);
@@ -1072,6 +1132,18 @@ void NetworkAnalyzer::run()
 			return;
 		}
 
+		QMetaObject::invokeMethod(this,
+					  "_saveChannelBuffers",
+					  Qt::QueuedConnection,
+					  Q_ARG(double, frequency),
+					  Q_ARG(double, adc_rate),
+					  Q_ARG(std::vector<float>, sinkCh1->data()),
+					  Q_ARG(std::vector<float>, sinkCh2->data()));
+
+//		_saveChannelBuffers(frequency,
+//				    adc_rate,
+//				    sinkCh1->data(),
+//				    sinkCh2->data());
 
 		// Plot the data captured for this iteration
 		QMetaObject::invokeMethod(this,
@@ -1085,6 +1157,118 @@ void NetworkAnalyzer::run()
 	}
 
 	Q_EMIT sweepDone();
+}
+
+void NetworkAnalyzer::displayForFrequency(double frequency)
+{
+//	qDebug() << "Display Curves for frequency: " << frequency;
+
+//	qDebug() << "Iterations size: " << iterations.size();
+
+//	int pos = -1;
+
+//	for (int i = 0; i < iterations.size() - 1; ++i) {
+//		qDebug() << iterations[i].frequency << " < " << frequency << " < " << iterations[i + 1].frequency;
+//		if (iterations[i].frequency <= frequency && frequency <= iterations[i + 1].frequency) {
+//			pos = i;
+//			break;
+//		}
+//	}
+
+//	qDebug() << "Display Curves for frequency: " << frequency << " pos: " << pos;
+
+//	if (pos == -1) {
+//		return;
+//	}
+
+//	if (pos >= oscData.size()) {
+//		return;
+//	}
+
+//	static bool firstTime = true;
+//	if (firstTime) {
+//		firstTime = false;
+//	} else {
+//		timePlot->unregisterReferenceWaveform("data1");
+//		timePlot->unregisterReferenceWaveform("data2");
+//	}
+
+//	QVector<double> xData;
+
+//	double division = 1.0 / adc_rates[pos];
+
+//	qDebug() << "HALF: " << -(oscData[pos].second.first.size() / 2)
+//		 << " " << oscData[pos].second.first.size() / 2;
+
+//	int n = oscData[pos].second.first.size() / 2;
+
+//	for (int i = -n; i < n; ++i) {
+//		xData.push_back(division * i);
+//	}
+
+//	QVector<double> yData1, yData2;
+//	for (int i = 0; i < oscData[pos].second.first.size(); ++i) {
+//		yData1.push_back(oscData[pos].second.first[i]);
+//	}
+//	for (int i = 0; i < oscData[pos].second.second.size(); ++i) {
+//		yData2.push_back(oscData[pos].second.second[i]);
+//	}
+
+//	timePlot->setYaxis(-amplitude->value() - 0.5, amplitude->value() + 0.5);
+//	timePlot->setXaxis(-(oscData[pos].second.first.size() * division), (oscData[pos].second.first.size() * division));
+//	timePlot->registerReferenceWaveform("data1", xData, yData1);
+//	timePlot->registerReferenceWaveform("data2", xData, yData2);
+
+//	timePlot->replot();
+}
+
+void NetworkAnalyzer::_saveChannelBuffers(double frequency, double sample_rate, std::vector<float> data1, std::vector<float> data2)
+{
+
+	Buffer buffer1 = Buffer(frequency, sample_rate, data1.size(), data1);
+	Buffer buffer2 = Buffer(frequency, sample_rate, data2.size(), data2);
+
+	bufferPreviewer->pushBuffers(QPair<Buffer, Buffer>(buffer1, buffer2));
+
+//	qDebug() << data1.size() << " " << data2.size();
+//	oscData.push_back(QPair<double, QPair<std::vector<float>, std::vector<float>>>(frequency,
+//										       QPair<std::vector<float>, std::vector<float>>(data1, data2)));
+//	adc_rates.push_back(sample_rate);
+
+//	double division = 1.0 / sample_rate;
+
+//	// quick fix for a bug in unregisterReferenceWaveform if "data1" is not found
+//	// TODO: fix unregisterReferenceWaveform
+//	static bool firstTime = true;
+//	if (firstTime) {
+////		timePlot->unregisterReferenceWaveform("data1");
+//		firstTime = false;
+//	} else {
+//		timePlot->unregisterReferenceWaveform("data1");
+//		timePlot->unregisterReferenceWaveform("data2");
+//	}
+
+//	QVector<double> xData;
+
+//	for (int i = -(data1.size() / 2); i < data1.size() / 2; ++i) {
+//		xData.push_back(division * i);
+//	}
+
+//	QVector<double> yData1, yData2;
+//	for (int i = 0; i < data1.size(); ++i) {
+//		yData1.push_back(data1[i]);
+//	}
+//	for (int i = 0; i < data2.size(); ++i) {
+//		yData2.push_back(data2[i]);
+//	}
+//	timePlot->setYaxis(-amplitude->value() - 0.5, amplitude->value() + 0.5);
+//	timePlot->setXaxis(-(data1.size() * division), (data1.size() * division));
+//	timePlot->registerReferenceWaveform("data1", xData, yData1);
+//	timePlot->registerReferenceWaveform("data2", xData, yData2);
+
+//	timePlot->replot();
+//	timePlot->registerReferenceWaveform("data1",);
+
 }
 
 void NetworkAnalyzer::computeCaptureParams(double frequency,

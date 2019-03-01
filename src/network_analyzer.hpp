@@ -35,8 +35,11 @@
 #include <gnuradio/blocks/vector_sink_s.h>
 #include <gnuradio/analog/sig_source_f.h>
 #include <gnuradio/blocks/float_to_short.h>
+#include "oscilloscope.hpp"
 
+#include "TimeDomainDisplayPlot.h"
 
+#include "networkanalyzerbufferviewer.h"
 
 extern "C" {
 	struct iio_buffer;
@@ -70,6 +73,8 @@ public:
 				 QPushButton *runButton, QJSEngine *engine,
 				 ToolLauncher *parent);
 	~NetworkAnalyzer();
+
+	void setOscilloscope(Oscilloscope *osc);
 
 private:
 	Ui::NetworkAnalyzer *ui;
@@ -116,9 +121,12 @@ private:
 
 	QVector<networkIteration> iterations;
 
+	NetworkAnalyzerBufferViewer *bufferPreviewer;
+	QVector<Buffer> capturedData;
 
 	PlotLineHandleH *d_hCursorHandle1;
 	PlotLineHandleH *d_hCursorHandle2;
+	FreePlotLineHandleH *d_frequencyHandle;
 	bool d_cursorsEnabled;
 
 	ScaleSpinButton *samplesCount;
@@ -170,6 +178,7 @@ private Q_SLOTS:
 	void startStop(bool start);
 	void updateNumSamples(bool force = false);
 	void plot(double frequency, double mag, double mag2, double phase);
+	void _saveChannelBuffers(double frequency, double sample_rate, std::vector<float> data1, std::vector<float> data2);
 
 	void toggleCursors(bool en);
 	void onVbar1PixelPosChanged(int pos);
@@ -186,6 +195,7 @@ public Q_SLOTS:
 
 	void showEvent(QShowEvent *event);
 
+	void displayForFrequency(double frequency);
 Q_SIGNALS:
 	void sweepDone();
 	void showTool();

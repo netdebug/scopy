@@ -896,6 +896,9 @@ void TimeDomainDisplayPlot::registerReferenceWaveform(QString name, QVector<doub
 
 	QColor color = getChannelColor();
 
+	qDebug() << name;
+	qDebug() << xData.size() << " " << yData.size();
+
 	QwtPlotCurve *curve = new QwtPlotCurve();
 	curve->setSamples(xData, yData);
 

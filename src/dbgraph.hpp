@@ -94,6 +94,7 @@ Q_SIGNALS:
 	void VBar1PixelPosChanged(int);
 	void VBar2PixelPosChanged(int);
 	void resetZoom();
+	void frequencySelected(double);
 
 public Q_SLOTS:
 	void plot(double x, double y);
@@ -134,6 +135,8 @@ public Q_SLOTS:
 	void mousePressEvent(QMouseEvent *event);
 	void onResetZoom();
 
+	void onFrequencyCursorPositionChanged(int pos);
+
 protected Q_SLOTS:
 	void showEvent(QShowEvent *event);
 
@@ -161,6 +164,7 @@ private:
 	VertBar *d_vBar1;
 	VertBar *d_vBar2;
 	VertBar *d_plotBar;
+	VertBar *d_frequencyBar;
 
 	PlotPickerWrapper *picker;
 

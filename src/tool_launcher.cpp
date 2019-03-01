@@ -1440,6 +1440,7 @@ void adiscope::ToolLauncher::enableAdcBasedTools()
 		connect(network_analyzer, &NetworkAnalyzer::showTool, [=]() {
 			toolMenu["Network Analyzer"]->getToolBtn()->click();
 		});
+		network_analyzer->setOscilloscope(oscilloscope);
 	}
 
 	Q_EMIT adcToolsCreated();
